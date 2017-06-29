@@ -22,8 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import argparse
 import logging
 import MySQLdb
-from .context import migrate
-from .context import util
+from migrationtool import migrate, util
 
 if __name__ == "__main__":
 
@@ -68,10 +67,10 @@ if __name__ == "__main__":
         exit(2)
 
     # start migration from host_from to host_to
-    try:
-        if args.domain:
-            logging.info("Starting migration for domain %s", args.domain)
+    if args.domain:
+        logging.info("Starting migration for domain %s", args.domain)
 
+    try:
         for user in util.select(db_from, "users",
                                 where="""username like '%%@%s'""" % args.domain if args.domain else None):
 
@@ -86,35 +85,43 @@ if __name__ == "__main__":
 
             # remove old user_id and insert him in new db
             del user["user_id"]
-            user["user_id"] = util.insert(db_to, "users", user)
-            if user["user_id"] != None:
-                identities = migrate.transfer_identities(db_from, db_to, where, user["user_id"])
-                logging.info("[USERNAME: %s] %d identities moved", user["username"], len(identities))
+            try:
+                user["user_id"] = util.insert(db_to, "users", user)
+            except Exception, e:
+                raise
+            except MySQLdb.error, e:
+                raise
 
-                if not args.skip_contacts:
-                    contacts = migrate.transfer_contacts(db_from, db_to, where, user["user_id"])
-                    logging.info("[USERNAME: %s] %d contacts moved", user["username"], len(contacts))
+            identities = migrate.transfer_identities(db_from, db_to, where, user["user_id"])
+            logging.info("[USERNAME: %s] %d identities moved", user["username"], len(identities))
 
-                    collected_contacts = migrate.transfer_collected_contacts(db_from, db_to, where,
-                                                                             user["user_id"])
-                    logging.info("[USERNAME: %s] %d collected contacts moved", user["username"],
-                                 len(collected_contacts))
+            if not args.skip_contacts:
+                contacts = migrate.transfer_contacts(db_from, db_to, where, user["user_id"])
+                logging.info("[USERNAME: %s] %d contacts moved", user["username"], len(contacts))
 
-                    contactgroups = migrate.transfer_contactgroups(db_from, db_to, where, user["user_id"])
-                    logging.info("[USERNAME: %s] %d contact groups moved", user["username"], len(contactgroups))
+                collected_contacts = migrate.transfer_collected_contacts(db_from, db_to, where,
+                                                                         user["user_id"])
+                logging.info("[USERNAME: %s] %d collected contacts moved", user["username"],
+                             len(collected_contacts))
 
-                    try:
-                        count_contactgroupmembers = migrate.populate_contactgroups(db_from, db_to,
-                                                                                   contacts,
-                                                                                   contactgroups)
-                        logging.info("[USERNAME: %s] %d contactgroup members trasfered from %d contact groups",
-                                     user["username"], count_contactgroupmembers, len(contactgroups))
-                    except Exception, exc:
-                        raise
+                contactgroups = migrate.transfer_contactgroups(db_from, db_to, where, user["user_id"])
+                logging.info("[USERNAME: %s] %d contact groups moved", user["username"], len(contactgroups))
 
-                logging.info("[USERNAME: %s] OK!", user["username"])
+                try:
+                    count_contactgroupmembers = migrate.populate_contactgroups(db_from, db_to,
+                                                                               contacts,
+                                                                               contactgroups)
+                    logging.info("[USERNAME: %s] %d contactgroup members trasfered from %d contact groups",
+                                 user["username"], count_contactgroupmembers, len(contactgroups))
+                except Exception, exc:
+                    raise
+
+            logging.info("[USERNAME: %s] OK!", user["username"])
     except Exception, exc:
-        print exc
+        logging.warning(exc)
+        db_to.rollback()
+    except MysSQLdb.error, e:
+        logging.error(str(e))
         db_to.rollback()
 
     # if everything goes well, commit

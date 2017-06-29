@@ -38,8 +38,10 @@ def select(db, table, where=None):
         for x in db_cursor.fetchall():
             yield x
     except Exception, exc:
-        logging.error(exc)
+        logging.warning(exc)
         raise
+    except MySQLdb.error, e:
+        logging.error(str(e))
     finally:
         db_cursor.close()
 
@@ -56,6 +58,10 @@ def insert(db, table, toInsert):
         db_cursor.executemany(query, [toInsert.values()])
     except Exception, exc:
         logging.error(exc)
+        db.rollback()
+        raise
+    except MySQLdb.error, e:
+        logging.error(e)
         db.rollback()
         raise
     finally:
